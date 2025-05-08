@@ -34,3 +34,5 @@ build/
 *.DS_Store
 .idea/
 .vscode/
+ios/opencv2.framework/
+ios_xcbuild/
