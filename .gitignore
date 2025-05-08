@@ -25,3 +25,12 @@ build
 node_modules
 CMakeSettings.json
 xcuserdata/
+pat.txt
+# Ignore platform-specific build outputs
+ios/build/
+build/
+*.xcworkspace
+*.xcodeproj
+*.DS_Store
+.idea/
+.vscode/

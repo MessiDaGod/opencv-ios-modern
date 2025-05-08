@@ -1,5 +1,6 @@
-## OpenCV: Open Source Computer Vision Library
+# This is a minimal OpenCV build script for iOS using only modern architectures, tested on M1 Pro and macOS Sequoia.
 
+## OpenCV: Open Source Computer Vision Library
 
 ### Resources
 
