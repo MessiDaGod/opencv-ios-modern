@@ -1,4 +1,10 @@
 #!/usr/bin/env python
+
+# CUSTOMIZED BY: Joe Shakely
+# Updated to remove deprecated architectures (armv7, i386)
+# Targets: arm64 (device), arm64 + x86_64 (simulator)
+# Compatible with Apple Silicon and iOS 13+
+
 """
 The script builds OpenCV.framework for iOS.
 The built framework is universal, it can be used to build app and run it on either iOS simulator or real device.
@@ -44,7 +50,7 @@ else:
 sys.path.insert(0, os.path.abspath(os.path.abspath(os.path.dirname(__file__))+'/../apple'))
 from cv_build_utils import execute, print_error, get_xcode_major, get_xcode_setting, get_xcode_version, get_cmake_version
 
-IPHONEOS_DEPLOYMENT_TARGET='9.0'  # default, can be changed via command line options or environment variable
+IPHONEOS_DEPLOYMENT_TARGET='13.0'  # default, can be changed via command line options or environment variable
 
 CURRENT_FILE_DIR = os.path.dirname(__file__)
 
@@ -558,7 +564,7 @@ if __name__ == "__main__":
         iphoneos_archs = args.iphoneos_archs.split(',')
     elif not args.build_only_specified_archs:
         # Supply defaults
-        iphoneos_archs = ["armv7", "armv7s", "arm64"]
+        iphoneos_archs = ["arm64"]
     print('Using iPhoneOS ARCHS=' + str(iphoneos_archs))
 
     iphonesimulator_archs = None
@@ -566,7 +572,7 @@ if __name__ == "__main__":
         iphonesimulator_archs = args.iphonesimulator_archs.split(',')
     elif not args.build_only_specified_archs:
         # Supply defaults
-        iphonesimulator_archs = ["i386", "x86_64"]
+        iphonesimulator_archs = ["x86_64"]
     print('Using iPhoneSimulator ARCHS=' + str(iphonesimulator_archs))
 
     # Prevent the build from happening if the same architecture is specified for multiple platforms.
