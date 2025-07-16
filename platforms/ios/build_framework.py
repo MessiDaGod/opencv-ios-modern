@@ -40,6 +40,7 @@ Adding --dynamic parameter will build {framework_name}.framework as App Store dy
 from __future__ import print_function, unicode_literals
 import glob, os, os.path, shutil, string, sys, argparse, traceback, multiprocessing, codecs, io
 from subprocess import check_call, check_output, CalledProcessError
+import plistlib
 
 if sys.version_info >= (3, 8): # Python 3.8+
     def copy_tree(src, dst):
@@ -53,7 +54,6 @@ from cv_build_utils import execute, print_error, get_xcode_major, get_xcode_sett
 IPHONEOS_DEPLOYMENT_TARGET='13.0'  # default, can be changed via command line options or environment variable
 
 CURRENT_FILE_DIR = os.path.dirname(__file__)
-
 
 class Builder:
     def __init__(self, opencv, contrib, dynamic, bitcodedisabled, exclude, disable, enablenonfree, targets, debug, debug_info, framework_name, run_tests, build_docs, swiftdisabled):
@@ -86,9 +86,7 @@ class Builder:
             assert get_cmake_version() >= (3, 17), "CMake 3.17 or later is required. Current version is {}".format(get_cmake_version())
 
     def getBuildDir(self, parent, target):
-
         res = os.path.join(parent, 'build-%s-%s' % (target[0].lower(), target[1].lower()))
-
         if not os.path.isdir(res):
             os.makedirs(res)
         return os.path.abspath(res)
@@ -105,10 +103,9 @@ class Builder:
 
         # build each architecture separately
         alltargets = []
-
         for target_group in self.targets:
             for arch in target_group[0]:
-                current = ( arch, target_group[1] )
+                current = (arch, target_group[1])
                 alltargets.append(current)
 
         for target in alltargets:
@@ -124,7 +121,7 @@ class Builder:
             if xcode_ver >= 7 and target[1] == 'Catalyst':
                 sdk_path = check_output(["xcodebuild", "-version", "-sdk", "macosx", "Path"]).decode('utf-8').rstrip()
                 c_flags = [
-                    "-target %s-apple-ios14.0-macabi" % target[0],  # e.g. x86_64-apple-ios13.2-macabi # -mmacosx-version-min=10.15
+                    "-target %s-apple-ios14.0-macabi" % target[0],
                     "-isysroot %s" % sdk_path,
                     "-iframework %s/System/iOSSupport/System/Library/Frameworks" % sdk_path,
                     "-isystem %s/System/iOSSupport/usr/include" % sdk_path,
@@ -134,14 +131,10 @@ class Builder:
                 cmake_flags.append("-DCMAKE_C_FLAGS=" + " ".join(c_flags))
                 cmake_flags.append("-DCMAKE_CXX_FLAGS=" + " ".join(c_flags))
                 cmake_flags.append("-DCMAKE_EXE_LINKER_FLAGS=" + " ".join(c_flags))
-
-                # CMake cannot compile Swift for Catalyst https://gitlab.kitware.com/cmake/cmake/-/issues/21436
-                # cmake_flags.append("-DCMAKE_Swift_FLAGS=" + " " + target_flag)
                 cmake_flags.append("-DSWIFT_DISABLED=1")
-
-                cmake_flags.append("-DIOS=1")  # Build the iOS codebase
-                cmake_flags.append("-DMAC_CATALYST=1")  # Set a flag for Mac Catalyst, just in case we need it
-                cmake_flags.append("-DWITH_OPENCL=OFF")  # Disable OpenCL; it isn't compatible with iOS
+                cmake_flags.append("-DIOS=1")
+                cmake_flags.append("-DMAC_CATALYST=1")
+                cmake_flags.append("-DWITH_OPENCL=OFF")
                 cmake_flags.append("-DCMAKE_OSX_SYSROOT=%s" % sdk_path)
                 cmake_flags.append("-DCMAKE_CXX_COMPILER_WORKS=TRUE")
                 cmake_flags.append("-DCMAKE_C_COMPILER_WORKS=TRUE")
@@ -200,7 +193,6 @@ class Builder:
         return "Debug" if self.debug else "Release"
 
     def getCMakeArgs(self, arch, target):
-
         args = [
             "cmake",
             "-GXcode",
@@ -233,14 +225,9 @@ class Builder:
         return args
 
     def getBuildCommand(self, arch, target):
-
-        buildcmd = [
-            "xcodebuild",
-        ]
-
+        buildcmd = ["xcodebuild"]
         if (self.dynamic or self.build_objc_wrapper) and not self.bitcodedisabled and target == "iPhoneOS":
             buildcmd.append("BITCODE_GENERATION_MODE=bitcode")
-
         buildcmd += [
             "IPHONEOS_DEPLOYMENT_TARGET=" + os.environ['IPHONEOS_DEPLOYMENT_TARGET'],
             "ARCHS=%s" % arch,
@@ -249,14 +236,12 @@ class Builder:
             "-parallelizeTargets",
             "-jobs", str(multiprocessing.cpu_count()),
         ]
-
         return buildcmd
 
     def getInfoPlist(self, builddirs):
         return os.path.join(builddirs[0], "ios", "Info.plist")
 
     def getObjcTarget(self, target):
-        # Obj-C generation target
         return 'ios'
 
     def makeCMakeCmd(self, arch, target, dir, cmakeargs = []):
@@ -287,25 +272,16 @@ class Builder:
             build_arch = check_output(["uname", "-m"]).decode('utf-8').rstrip()
             if build_arch != arch:
                 print("build_arch (%s) != arch (%s)" % (build_arch, arch))
-                cmakecmd.append("-DCMAKE_SYSTEM_PROCESSOR=" + arch)
+                cmakecmd.append("-CMAKE_SYSTEM_PROCESSOR=" + arch)
                 cmakecmd.append("-DCMAKE_OSX_ARCHITECTURES=" + arch)
                 cmakecmd.append("-DCPU_BASELINE=DETECT")
                 cmakecmd.append("-DCMAKE_CROSSCOMPILING=ON")
                 cmakecmd.append("-DOPENCV_WORKAROUND_CMAKE_20989=ON")
-
         cmakecmd.append(dir)
         cmakecmd.extend(cmakeargs)
         return cmakecmd
 
     def buildOne(self, arch, target, builddir, cmakeargs = []):
-        # Run cmake
-        #toolchain = self.getToolchain(arch, target)
-        #cmakecmd = self.getCMakeArgs(arch, target) + \
-        #    (["-DCMAKE_TOOLCHAIN_FILE=%s" % toolchain] if toolchain is not None else [])
-        #if target.lower().startswith("iphoneos"):
-        #    cmakecmd.append("-DCPU_BASELINE=DETECT")
-        #cmakecmd.append(self.opencv)
-        #cmakecmd.extend(cmakeargs)
         cmakecmd = self.makeCMakeCmd(arch, target, self.opencv, cmakeargs)
         print("")
         print("=================================")
@@ -318,8 +294,6 @@ class Builder:
         print("Xcodebuild")
         print("=================================")
         print("")
-
-        # Clean and build
         clean_dir = os.path.join(builddir, "install")
         if os.path.isdir(clean_dir):
             shutil.rmtree(clean_dir)
@@ -334,7 +308,6 @@ class Builder:
             cmakecmd.append("-DCMAKE_INSTALL_NAME_TOOL=install_name_tool")
             cmakecmd.append("--no-warn-unused-cli")
             execute(cmakecmd, cwd = builddir + "/modules/objc/framework_build")
-
             execute(buildcmd + ["-target", "ALL_BUILD", "build"], cwd = builddir + "/modules/objc/framework_build")
             execute(["cmake", "-DBUILD_TYPE=%s" % self.getConfiguration(), "-DCMAKE_INSTALL_PREFIX=%s" % (builddir + "/install"), "-P", "cmake_install.cmake"], cwd = builddir + "/modules/objc/framework_build")
 
@@ -342,7 +315,6 @@ class Builder:
         res = os.path.join(builddir, "lib", self.getConfiguration(), "libopencv_merged.a")
         libs = glob.glob(os.path.join(builddir, "install", "lib", "*.a"))
         module = [os.path.join(builddir, "install", "lib", self.framework_name + ".framework", self.framework_name)] if self.build_objc_wrapper else []
-
         libs3 = glob.glob(os.path.join(builddir, "install", "lib", "3rdparty", "*.a"))
         print("Merging libraries:\n\t%s" % "\n\t".join(libs + libs3 + module), file=sys.stderr)
         execute(["libtool", "-static", "-o", res] + libs + libs3 + module)
@@ -360,9 +332,7 @@ class Builder:
             module = [os.path.join(builddir, "lib", self.getConfiguration(), self.framework_name + ".framework", self.framework_name)]
         else:
             module = []
-
         libs3 = glob.glob(os.path.join(builddir, "install", "lib", "3rdparty", "*.a"))
-
         if os.environ.get('IPHONEOS_DEPLOYMENT_TARGET'):
             link_target = target[:target.find("-")] + "-apple-ios" + os.environ['IPHONEOS_DEPLOYMENT_TARGET'] + ("-simulator" if target.endswith("simulator") else "")
         else:
@@ -400,8 +370,8 @@ class Builder:
             "-Xlinker", "-rpath",
             "-Xlinker", "/usr/lib/swift",
             "-target", link_target,
-            "-isysroot", sdk_dir,] +
-            framework_options + [
+            "-isysroot", sdk_dir,
+        ] + framework_options + [
             "-install_name", "@rpath/" + self.framework_name + ".framework/" + self.framework_name,
             "-dynamiclib", "-dead_strip", "-fobjc-link-runtime", "-all_load",
             "-o", res
@@ -410,7 +380,7 @@ class Builder:
     def makeFramework(self, outdir, builddirs):
         name = self.framework_name
 
-        # set the current dir to the dst root
+        # Set the current dir to the dst root
         framework_dir = os.path.join(outdir, "%s.framework" % name)
         if os.path.isdir(framework_dir):
             shutil.rmtree(framework_dir)
@@ -421,7 +391,7 @@ class Builder:
         else:
             dstdir = os.path.join(framework_dir, "Versions", "A")
 
-        # copy headers from one of build folders
+        # Copy headers from one of build folders
         shutil.copytree(os.path.join(builddirs[0], "install", "include", "opencv2"), os.path.join(dstdir, "Headers"))
         if name != "opencv2":
             for dirname, dirs, files in os.walk(os.path.join(dstdir, "Headers")):
@@ -433,17 +403,19 @@ class Builder:
                     body = body.replace("include <opencv2/", "include <" + name + "/")
                     with codecs.open(filepath, "w", "utf-8") as file:
                         file.write(body)
+
+        # Copy additional headers and modules if building with Objective-C wrapper
         if self.build_objc_wrapper:
             copy_tree(os.path.join(builddirs[0], "install", "lib", name + ".framework", "Headers"), os.path.join(dstdir, "Headers"))
             platform_name_map = {
-                    "arm": "armv7-apple-ios",
-                    "arm64": "arm64-apple-ios",
-                    "i386": "i386-apple-ios-simulator",
-                    "x86_64": "x86_64-apple-ios-simulator",
-                } if builddirs[0].find("iphone") != -1 else {
-                    "x86_64": "x86_64-apple-macos",
-                    "arm64": "arm64-apple-macos",
-                }
+                "arm": "armv7-apple-ios",
+                "arm64": "arm64-apple-ios",
+                "i386": "i386-apple-ios-simulator",
+                "x86_64": "x86_64-apple-ios-simulator",
+            } if builddirs[0].find("iphone") != -1 else {
+                "x86_64": "x86_64-apple-macos",
+                "arm64": "arm64-apple-macos",
+            }
             for d in builddirs:
                 copy_tree(os.path.join(d, "install", "lib", name + ".framework", "Modules"), os.path.join(dstdir, "Modules"))
             for dirname, dirs, files in os.walk(os.path.join(dstdir, "Modules")):
@@ -453,7 +425,7 @@ class Builder:
                     if filestem in platform_name_map:
                         os.rename(os.path.join(dirname, filename), os.path.join(dirname, platform_name_map[filestem] + fileext))
 
-        # make universal static lib
+        # Make universal static lib
         if self.dynamic:
             libs = [os.path.join(d, "install", "lib", name + ".framework", name) for d in builddirs]
         else:
@@ -464,17 +436,59 @@ class Builder:
         print("Creating universal library from:\n\t%s" % "\n\t".join(libs), file=sys.stderr)
         execute(lipocmd)
 
-        # dynamic framework has different structure, just copy the Plist directly
+        # Create default Info.plist content if none exists
+        default_info_plist = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>{name}</string>
+    <key>CFBundleIdentifier</key>
+    <string>org.opencv</string>
+    <key>CFBundleName</key>
+    <string>{name}</string>
+    <key>CFBundleVersion</key>
+    <string>1.0</string>
+    <key>CFBundlePackageType</key>
+    <string>FMWK</string>
+</dict>
+</plist>""".format(name=name)
+
+        # Handle Info.plist and PrivacyInfo.xcprivacy
         if self.dynamic:
             resdir = dstdir
-            shutil.copyfile(self.getInfoPlist(builddirs), os.path.join(resdir, "Info.plist"))
         else:
-            # copy Info.plist
             resdir = os.path.join(dstdir, "Resources")
             os.makedirs(resdir)
-            shutil.copyfile(self.getInfoPlist(builddirs), os.path.join(resdir, "Info.plist"))
 
-            # make symbolic links
+        # Copy or create Info.plist, ensuring CFBundleExecutable is present
+        info_plist_path = os.path.join(resdir, "Info.plist")
+        info_plist_src = self.getInfoPlist(builddirs)
+        if os.path.exists(info_plist_src):
+            # Read the existing Info.plist
+            with open(info_plist_src, "rb") as f:
+                plist_data = plistlib.load(f)
+            # Ensure CFBundleExecutable is set
+            if "CFBundleExecutable" not in plist_data:
+                print("Adding missing CFBundleExecutable to Info.plist", file=sys.stderr)
+                plist_data["CFBundleExecutable"] = name
+            # Write the updated Info.plist
+            with open(info_plist_path, "wb") as f:
+                plistlib.dump(plist_data, f)
+        else:
+            print("Warning: Info.plist not found at {}. Creating a default one.".format(info_plist_src), file=sys.stderr)
+            with open(info_plist_path, "w") as f:
+                f.write(default_info_plist)
+
+        # Copy Apple privacy manifest
+        privacy_manifest_src = os.path.join(CURRENT_FILE_DIR, "PrivacyInfo.xcprivacy")
+        if os.path.exists(privacy_manifest_src):
+            shutil.copyfile(privacy_manifest_src, os.path.join(resdir, "PrivacyInfo.xcprivacy"))
+        else:
+            print("Warning: PrivacyInfo.xcprivacy not found at {}. Skipping.".format(privacy_manifest_src), file=sys.stderr)
+
+        # Create symbolic links for non-dynamic frameworks
+        if not self.dynamic:
             links = [
                 (["A"], ["Versions", "Current"]),
                 (["Versions", "Current", "Headers"], ["Headers"]),
@@ -486,15 +500,11 @@ class Builder:
                 s = os.path.join(*l[0])
                 d = os.path.join(framework_dir, *l[1])
                 os.symlink(s, d)
-        # Copy Apple privacy manifest
-        shutil.copyfile(os.path.join(CURRENT_FILE_DIR, "PrivacyInfo.xcprivacy"),
-                        os.path.join(resdir, "PrivacyInfo.xcprivacy"))
 
     def copy_samples(self, outdir):
         return
 
 class iOSBuilder(Builder):
-
     def getToolchain(self, arch, target):
         toolchain = os.path.join(self.opencv, "platforms", "ios", "cmake", "Toolchains", "Toolchain-%s_Xcode.cmake" % target)
         return toolchain
@@ -527,11 +537,9 @@ class iOSBuilder(Builder):
                     with open(filepath, "w") as file:
                         file.write(body)
 
-
 if __name__ == "__main__":
     folder = os.path.abspath(os.path.join(os.path.dirname(sys.argv[0]), "../.."))
     parser = argparse.ArgumentParser(description='The script builds OpenCV.framework for iOS.')
-    # TODO: When we can make breaking changes, we should make the out argument explicit and required like in build_xcframework.py.
     parser.add_argument('out', metavar='OUTDIR', help='folder to put built framework')
     parser.add_argument('--opencv', metavar='DIR', default=folder, help='folder with opencv repository (default is "../.." relative to script location)')
     parser.add_argument('--contrib', metavar='DIR', default=None, help='folder with opencv_contrib repository (default is "None" - build only main framework)')
@@ -576,8 +584,6 @@ if __name__ == "__main__":
     print('Using iPhoneSimulator ARCHS=' + str(iphonesimulator_archs))
 
     # Prevent the build from happening if the same architecture is specified for multiple platforms.
-    # When `lipo` is run to stitch the frameworks together into a fat framework, it'll fail, so it's
-    # better to stop here while we're ahead.
     if iphoneos_archs and iphonesimulator_archs:
         duplicate_archs = set(iphoneos_archs).intersection(iphonesimulator_archs)
         if duplicate_archs:
@@ -605,5 +611,4 @@ if __name__ == "__main__":
             targets.append((iphonesimulator_archs, "iPhoneSimulator"))
 
     b = iOSBuilder(args.opencv, args.contrib, args.dynamic, args.bitcodedisabled, args.without, args.disable, args.enablenonfree, targets, args.debug, args.debug_info, args.framework_name, args.run_tests, args.build_docs, args.swiftdisabled)
-
     b.build(args.out)
